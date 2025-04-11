@@ -1,0 +1,43 @@
+<powershell>
+$DomainName = "${DomainName}"
+$DomainNetBIOSName = "${DomainNetBIOSName}"
+$pvt_ip_subnet = "${pvt_ip_subnet}"
+$folderName = @("CEO", "Finance", "Engineering", "Office", "Management", "Sales")
+
+# Install AD Service
+Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
+
+# Disabling AutoUpdates
+New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Force
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name NoAutoUpdate -Value 1
+Write-Host "AutoUpdates disabled"
+
+# Change Keyboard Layout to Swissgerman
+Set-WinUserLanguageList -Force 'de-CH'
+Write-Host "Layout was changed to de-CH"
+
+# Domain promote
+Install-ADDSForest -DomainName $DomainName -ForestMode Default -DomainMode Default -DomainNetbiosName $DomainNetBIOSName -SafeModeAdministratorPassword (ConvertTo-SecureString "P@ssw0rd01" -AsPlainText -Force) -InstallDNS -Force
+
+Install-ADDSForest -InstallDNS -DomainName "IPA.local"
+Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses "127.0.0.1"
+Add-DnsServerPrimaryZone -NetworkID "$pvt_ip_subnet" -ReplicationScope "Domain"
+Add-DnsServerResourceRecordPtr -Name "25" -ZoneName "2.20.172.in-addr.arpa" -PtrDomainName "$DomainName.local"
+Restart-Service -Name DNS
+
+Import-Module ActiveDirectory -ErrorAction Stop
+Import-Module GroupPolicy -ErrorAction Stop
+Install-WindowsFeature GPMC
+
+# Creates Main folder for fileshare
+New-Item -Path "C:\$DomainName" -ItemType Directory -Force
+New-SmbShare -Name "$DomainName" -Path "C:\$DomainName" -FullAccess "Everyone"
+
+# Creates Sub folders for fileshare
+foreach ($folder in $folderName) {
+    New-Item -Path "C:\$DomainName\$folder" -ItemType Directory -Force
+}
+
+# Reboot the EC2 instance
+Restart-Computer -Force
+</powershell>
